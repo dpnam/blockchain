@@ -318,3 +318,121 @@ class EC(object):
         return R
     pass
 
+def encrypt_ecc_unit(hex_str):
+    # convert hex to dec
+    x = int('0x' + hex_str, 0)
+    
+    # convert x in (x', y') in Elliptic
+    i = 0
+    while (i <= 10000):
+        fake_x = x*l + i
+        try: 
+            M, mM = ec.at(fake_x)
+
+            condition_1 = (M.x == mM.x) and (M.x == fake_x)
+            condition_2 = (ec.neg(M) == mM)
+            condition_3 = ec.is_valid(M) and ec.is_valid(mM)
+
+            if condition_1 and condition_2 and condition_3:
+                break
+        except:
+            pass
+
+        i += 1
+            
+    # encrypt
+    P = P1
+    Q_a = ec.mul(P, n_a)
+
+    M = M
+    k = 11
+
+    # C_1 = k*P 
+    C_1 = ec.mul(P, k)
+
+    # C_2 = M + k*Q_a
+    C_2 = ec.add(M, ec.mul(Q_a, k))
+    
+    # sent encrypt
+    encrypt_x = dec_to_hex(C_1.x, buff_size_output)[2:] + dec_to_hex(C_2.x, buff_size_output)[2:]
+    encrypt_y = dec_to_hex(C_1.y, buff_size_output)[2:] + dec_to_hex(C_2.y, buff_size_output)[2:]
+    
+    # return
+    return encrypt_x, encrypt_y
+
+def decrypt_ecc_unit(encrypt_x, encrypt_y):
+    # get C_1, C_2
+    C_1_x = int('0x' + encrypt_x[:buff_size_output], 0)
+    C_1_y = int('0x' + encrypt_y[:buff_size_output], 0)
+    C_1 = Coord(x=C_1_x, y=C_1_y)
+    
+    C_2_x = int('0x' + encrypt_x[buff_size_output: ], 0)
+    C_2_y = int('0x' + encrypt_y[buff_size_output: ], 0)
+    C_2 = Coord(x=C_2_x, y=C_2_y)
+    
+    # C_2 – n_a*C_1
+    decrypt_point = ec.add(C_2, ec.neg(ec.mul(C_1, n_a)))
+    decrypt_x = int(decrypt_point.x//l)
+    
+    # return
+    return hex(decrypt_x)[2:]
+
+# SAMPLE
+p = generate_prime(n=256)
+a = random.getrandbits(128) % p
+b = random.getrandbits(128) % p
+
+ec = EC(a, b, p)
+
+# params
+l = 35
+fake_p = p // l
+
+buff_size_input = len((hex((1 << fake_p.bit_length()) - 1))[2:]) - 1
+buff_size_output = len((hex((1 << p.bit_length()) - 1))[2:])
+
+# public key
+P_x = random.getrandbits(128)
+P = Coord(x=P_x % p, y=ec.at(P_x)[0].y)
+
+# private key
+n_a = 5
+
+msg = ''' 
+- Đặng Phương Nam 3131 trường đại học khoa học tự nhiên thành phố hồ chí minh 
+- abc adadwadawd
+'''
+hex_msg = msg.encode('utf-8').hex()
+
+# Encrypt
+encrypt_x_s = ''
+encrypt_y_s = ''
+
+curr = 0
+while curr < len(hex_msg):
+    sub_hex_msg = hex_msg[curr:curr+buff_size_input]
+    
+    encrypt_x, encrypt_y = encrypt_ecc_unit(sub_hex_msg)
+    
+    encrypt_x_s += encrypt_x
+    encrypt_y_s += encrypt_y
+    
+    curr += buff_size_input
+    
+# Decrypt
+dec_decrypt_s = ''
+len_encrypt = len(encrypt_x_s) # or len(encrypt_y_s)
+
+curr = 0
+while curr < len_encrypt:
+    encrypt_x = encrypt_x_s[curr:curr+buff_size_output*2]
+    encrypt_y = encrypt_y_s[curr:curr+buff_size_output*2]
+        
+    dec_decrypt = str(decrypt_ecc_unit(encrypt_x, encrypt_y))
+    dec_decrypt_s += dec_decrypt
+    
+    curr += buff_size_output*2
+    
+encrypt_str_x = encrypt_x_s
+encrypt_str_y = encrypt_y_s
+decrypt_str = bytes.fromhex(hex(int('0x'+ dec_decrypt_s, 0))[2:]).decode('utf-8')
