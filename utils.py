@@ -1,8 +1,14 @@
-# Refs: https://github.com/NikolaiT/Large-Primes-for-RSA/blob/master/generate_primes.py
+# libs
 import re
 import random
 import math
+import collections
 
+# Init data structure
+Coord = collections.namedtuple("Coord", ["x", "y"])
+
+######################################## HELPER FUNCTIONS ########################################
+# Refs: https://github.com/NikolaiT/Large-Primes-for-RSA/blob/master/generate_primes.py
 def fermat_primality_test(p, s=5):
     """
     a^(p-1) ≡ 1 mod p
@@ -196,10 +202,8 @@ def modular_sqrt(a, p):
         b = (b * g) % p
         r = m
 
+######################################## ELLIPTIC CURVE ########################################
 # Ref: https://gist.github.com/bellbind/1414867/03b4b2dd79b41e65e51716076e5e2b0171628a10
-import collections
-Coord = collections.namedtuple("Coord", ["x", "y"])
-
 def inv(n, p):
     """div on PN modulo a/b mod p as a * inv(b, p) mod p
     >>> assert n * inv(n, p) % p == 1
@@ -318,191 +322,193 @@ class EC(object):
         return R
     pass
 
-# func: convert decimal to hexadecimal with buff_size of hexadecimal
-def dec_to_hex(dec_number, buff_size):
-    dec_str = hex(dec_number)[2:]
-    for i in range(buff_size - len(dec_str)):
-        dec_str = '0' + dec_str
-    dec_str = '0x' + dec_str
-    
-    return dec_str
-
-# func: encrypt_ecc_unit
-def encrypt_ecc_unit(hex_str):
-    # convert hex to dec
-    x = int('0x' + hex_str, 0)
-    
-    # convert x in (x', y') in Elliptic
-    i = 0
-    while (i <= 10000):
-        fake_x = x*l + i
-        try: 
-            M, mM = curr_ec.at(fake_x)
-
-            condition_1 = (M.x == mM.x) and (M.x == fake_x)
-            condition_2 = (curr_ec.neg(M) == mM)
-            condition_3 = curr_ec.is_valid(M) and curr_ec.is_valid(mM)
-
-            if condition_1 and condition_2 and condition_3:
-                break
-        except:
-            pass
-
-        i += 1
-            
-    # encrypt
-    Q_a = curr_ec.mul(P, n_a)
-    k = 11
-
-    # C_1 = k*P 
-    C_1 = curr_ec.mul(P, k)
-
-    # C_2 = M + k*Q_a
-    C_2 = curr_ec.add(M, curr_ec.mul(Q_a, k))
-    
-    # sent encrypt
-    _C_1 = dec_to_hex(C_1.x, buff_size_output)[2:] + dec_to_hex(C_1.y, buff_size_output)[2:]
-    _C_2 = dec_to_hex(C_2.x, buff_size_output)[2:] + dec_to_hex(C_2.y, buff_size_output)[2:]
-    
-    # return
-    return _C_1, _C_2
-
-# func: decrypt_ecc_unit
-def decrypt_ecc_unit(_C_1, _C_2):
-    # get C_1, C_2
-    C_1_x = int('0x' + _C_1[:buff_size_output], 0)
-    C_1_y = int('0x' + _C_1[buff_size_output:], 0)
-    C_1 = Coord(x=C_1_x, y=C_1_y)
-    
-    C_2_x = int('0x' + _C_2[:buff_size_output], 0)
-    C_2_y = int('0x' + _C_2[buff_size_output:], 0)
-    C_2 = Coord(x=C_2_x, y=C_2_y)
-    
-    # C_2 – n_a*C_1
-    decrypt_point = curr_ec.add(C_2, curr_ec.neg(curr_ec.mul(C_1, n_a)))
-    decrypt_x = int(decrypt_point.x//l)
-    
-    # return
-    return hex(decrypt_x)[2:]
-
-# func: encrypt_ecc_msg
-def encrypt_ecc_msg(msg):
-    # convert to hex_msg
-    hex_msg = msg.encode('utf-8').hex()
-    
-    # params
-    _C_1_s = ''
-    _C_2_s = ''
-
-    # loop encrypt with buff_size_input
-    curr = 0
-    while curr < len(hex_msg):
-        sub_hex_msg = hex_msg[curr:curr+buff_size_input]
-
-        _C_1, _C_2 = encrypt_ecc_unit(sub_hex_msg)
-
-        _C_1_s += _C_1
-        _C_2_s += _C_2
-
-        curr += buff_size_input
-
-    # return 
-    return _C_1_s, _C_2_s
-
-# func: decrypt_ecc_msg
-def decrypt_ecc_msg(_C_1_s, _C_2_s):
-    # params
-    dec_decrypt_s = ''
-    len_encrypt = len(_C_1_s) # or len(_C_2_s)
-
-    # loop decrypt with buff_size_output
-    curr = 0
-    while curr < len_encrypt:
-        _C_1 = _C_1_s[curr:curr+buff_size_output*2]
-        _C_2 = _C_2_s[curr:curr+buff_size_output*2]
-
-        dec_decrypt = str(decrypt_ecc_unit(_C_1, _C_2))
-        dec_decrypt_s += dec_decrypt
-
-        curr += buff_size_output*2
-
-    # convert string to hex
-    decrypt_msg = bytes.fromhex(hex(int('0x'+ dec_decrypt_s, 0))[2:]).decode('utf-8')
-    
-    # return
-    return decrypt_msg
-
-########################### SAMPLE ###########################
-# Key Exchange
-## init elliptic curve
-p = generate_prime(n=160)
-a = random.getrandbits(128) % p
-b = random.getrandbits(128) % p
-curr_ec = EC(a, b, p)
-buff_size_output = len((hex((1 << p.bit_length()) - 1))[2:])
-
-## random point P
-while True:
-    try:
-        x = random.getrandbits(128) % p
-        P = Coord(x=x, y=curr_ec.at(x)[0].y)
-        break
+######################################## ELLIPTIC CURVE CRYPTO ########################################
+class ECC(object):
+    # init Elliptic Curve in Field (finite) and point in Elliptic Curve
+    def __init__(self, a, b, p):
+        """elliptic curve (E) as: (y**2 = x**3 + a * x + b) mod p
+        - a, b: params of curve formula
+        - p: (large) prime number
+        """
         
-    except:
+        # init Elliptic Curve
+        self.ec = EC(a, b, p)
+        self.p = p
+        
+        # default: interger (30 <= l <= 50) to support ElGamal
+        self.l = 35
+        
+        # define buff_size for output (hexdecimal)
+        fake_p = self.p // self.l
+        self.buff_size_input = len((hex((1 << fake_p.bit_length()) - 1))[2:]) - 1
+        self.buff_size_output = len((hex((1 << self.p.bit_length()) - 1))[2:])
+        
+        # random point P
+        i = 0
+        while (i <= 10000):
+            try:
+                x = random.getrandbits(128) % self.p
+                self.P = Coord(x=x, y=self.ec.at(x)[0].y)
+                break
+
+            except:
+                pass
+            
+            i += 1
+        
         pass
     
-## create Q_a and Q_b
-n_a = 123456789
-Q_a = curr_ec.mul(P, n_a)
+    # func: convert decimal to hexadecimal with buff_size of hexadecimal
+    def dec_to_hex(self, dec_number, buff_size):
+        dec_str = hex(dec_number)[2:]
+        for i in range(buff_size - len(dec_str)):
+            dec_str = '0' + dec_str
+        dec_str = '0x' + dec_str
 
-n_b = 987654321
-Q_b = curr_ec.mul(P, n_b)
+        return dec_str
+    
+    # func: convert Point (2D) to Key(0x...) 
+    def point_to_key(self, K):
+        key = '0x' + self.dec_to_hex(K.x, self.buff_size_output)[2:] + self.dec_to_hex(K.y, self.buff_size_output)[2:]
+        return key
+    
+    # func: convert Key(0x...) to Point (2D)
+    def key_to_point(self, key):
+        key = key[2:]
+        x = int('0x' + key[:self.buff_size_output], 0)
+        y = int('0x' + key[self.buff_size_output:], 0)
+        K = Coord(x=x, y=y)
+        
+        return K
+    
+    # func: Elliptic Diffie-Hellman key exchange
+    def key_exchange(self, n_a, n_b):
+        # create Q_a and Q_b
+        Q_a = self.ec.mul(self.P, n_a)
+        Q_b = self.ec.mul(self.P, n_b)
+        
+        # share secret point: n_a*Q_b == n_b*Q_a
+        assert self.ec.mul(Q_b, n_a) == self.ec.mul(Q_a, n_b)
+        K = self.ec.mul(Q_a, n_b)
+        
+        # covert point 2D to 1D
+        share_secret_key = self.point_to_key(K)
+        
+        # return
+        return share_secret_key
+    
+    # func: create public_key from private_key
+    def el_gamal_keys(self, private_key):
+        Q_a = self.ec.mul(self.P, int(private_key, 0))
+        public_key = self.point_to_key(Q_a)
+        
+        return private_key, public_key
+    
+    # func: encrypt_ecc_unit
+    def encrypt_ecc_unit(self, hex_str, public_key, ephemeral_key):
+        # params
+        x = int('0x' + hex_str, 0)
+        Q_a = self.key_to_point(public_key)
 
-## share secret point
-assert curr_ec.mul(Q_a, n_b) == curr_ec.mul(Q_b, n_a)
-K = curr_ec.mul(Q_a, n_b)
-share_secret_key = '0x' + dec_to_hex(K.x, buff_size_output)[2:] + dec_to_hex(K.y, buff_size_output)[2:]
+        # convert x in (x', y') in Elliptic
+        i = 0
+        while (i <= 10000):
+            fake_x = x*self.l + i
+            try: 
+                M, mM = self.ec.at(fake_x)
 
-print(K)
-print('Share Secret Key: ' + share_secret_key)
+                condition_1 = (M.x == mM.x) and (M.x == fake_x)
+                condition_2 = (self.ec.neg(M) == mM)
+                condition_3 = self.ec.is_valid(M) and self.ec.is_valid(mM)
 
-# Encrypt/Decrypt
-## https://crypto.stackexchange.com/questions/76340/how-to-create-an-ec-point-from-a-plaintext-message-for-encryption
-p = generate_prime(n=160)
-a = random.getrandbits(128) % p
-b = random.getrandbits(128) % p
+                if condition_1 and condition_2 and condition_3:
+                    break
+            except:
+                pass
 
-curr_ec = EC(a, b, p)
+            i += 1
 
-## params
-l = 41
-fake_p = p // l
+        # C_1 = k*P 
+        C_1 = self.ec.mul(self.P, ephemeral_key)
 
-buff_size_input = len((hex((1 << fake_p.bit_length()) - 1))[2:]) - 1
-buff_size_output = len((hex((1 << p.bit_length()) - 1))[2:])
+        # C_2 = M + k*Q_a
+        C_2 = self.ec.add(M, self.ec.mul(Q_a, ephemeral_key))
 
-## public key
-while True:
-    try:
-        x = random.getrandbits(128) % p
-        P = Coord(x=x, y=curr_ec.at(x)[0].y)
-        break
-    except:
-        pass
+        # sent encrypt
+        ciphertext_1 = self.point_to_key(C_1)
+        ciphertext_2 = self.point_to_key(C_2)
 
-## private key
-n_a = 124124
+        # return
+        return ciphertext_1, ciphertext_2
+    
+    # func: decrypt_ecc_unit
+    def decrypt_ecc_unit(self, ciphertext_1, ciphertext_2, private_key):
+        # params
+        n_a = int(private_key, 0)
+        
+        # get C_1, C_2
+        C_1 = self.key_to_point(ciphertext_1)
+        C_2 = self.key_to_point(ciphertext_2)
 
-## meassge
-msg = ''' 
-- Đặng Phương Nam 3131 trường đại học khoa học tự nhiên thành phố hồ chí minh 
-- abc adadwadawd
-'''
+        # C_2 – n_a*C_1
+        decrypt_point = self.ec.add(C_2, self.ec.neg(self.ec.mul(C_1, n_a)))
+        decrypt_x = int(decrypt_point.x//self.l)
 
-## encrypt
-_C_1_s, _C_2_s = encrypt_ecc_msg(msg)
-decrypt_msg = decrypt_ecc_msg(_C_1_s, _C_2_s)
+        # return
+        return hex(decrypt_x)
+    
+    
+    # func: encrypt_ecc_msg
+    def encrypt_ecc_msg(self, msg, public_key, ephemeral_key):
+        # convert to hex_msg
+        hex_msg = msg.encode('utf-8').hex()
 
-print(_C_1_s)
-print(_C_2_s)
-print(decrypt_msg)
+        # params
+        ciphertext_1_s = ''
+        ciphertext_2_s = ''
+
+        # loop encrypt with buff_size_input
+        curr = 0
+        while curr < len(hex_msg):
+            sub_hex_msg = hex_msg[curr:curr+self.buff_size_input]
+
+            ciphertext_1, ciphertext_2 = self.encrypt_ecc_unit(sub_hex_msg, public_key, ephemeral_key)
+
+            ciphertext_1_s += ciphertext_1[2:]
+            ciphertext_2_s += ciphertext_2[2:]
+
+            curr += self.buff_size_input
+
+        ciphertext_1_s = '0x' + ciphertext_1_s
+        ciphertext_2_s = '0x' + ciphertext_2_s
+        
+        # return 
+        return ciphertext_1_s, ciphertext_2_s
+    
+    # func: decrypt_ecc_msg
+    def decrypt_ecc_msg(self, ciphertext_1_s, ciphertext_2_s, private_key):
+        # params
+        dec_decrypt_s = ''
+        len_encrypt = len(ciphertext_1_s) # or len(ciphertext_2_s)
+
+        # loop decrypt with buff_size_output
+        curr = 0
+        while curr < len_encrypt:
+            ciphertext_1 = '0x' + ciphertext_1_s[2:][curr:curr+self.buff_size_output*2]
+            ciphertext_2 = '0x' + ciphertext_2_s[2:][curr:curr+self.buff_size_output*2]
+            
+            try:
+                dec_decrypt = self.decrypt_ecc_unit(ciphertext_1, ciphertext_2, private_key)
+                dec_decrypt_s += dec_decrypt[2:]
+            except:
+                pass
+
+            curr += self.buff_size_output*2
+
+        dec_decrypt_s = '0x'+ dec_decrypt_s
+        
+        # convert string to hex
+        decrypt_msg = bytes.fromhex(hex(int(dec_decrypt_s, 0))[2:]).decode('utf-8')
+
+        # return
+        return decrypt_msg
