@@ -24,6 +24,7 @@ PUBLIC_PATH = f'{DATABASE_PATH}/public'
 
 class dAppUser:
     def __init__(self):
+        self.k_pow = 4
         self.db_account = None
         self.block_chain = None
         
@@ -93,7 +94,7 @@ class dAppUser:
 
         return result
     
-    def query_amount_available_from_account(self, checkpoint=None):
+    def query_amount_available_offline(self, checkpoint=None):
         self.update_data()
         
         # load data
@@ -125,6 +126,48 @@ class dAppUser:
 
         # return
         return amount_available
+    
+    def query_amount_available_online(self, address, checkpoint=None):
+        self.update_data()
+        
+        # parms
+        tx_total = []
+        for name_block in self.block_chain.keys():
+            block = self.block_chain[name_block]
+            tx_total += block['data']
+
+        tx_total += self.buffer_tx_data
+
+        history = pd.DataFrame(tx_total)
+        history['amount'] = history['amount'].apply(self.calculate_amount)
+        history = pd.DataFrame(history)
+        
+        if checkpoint != None:
+            history = history[history['timestamp'] <= checkpoint]
+
+        # calculate amount in
+        amount_in = 0
+        if address == self.db_account['SER00000']['address']:
+            amount_in = 100000
+
+        history_in = history[history['to'] == address]
+        if len(history_in) != 0:
+            amount_in = history_in['amount'].sum()
+
+        # calculate amount out
+        amount_out = 0
+        history_out = history[history['from'] == address]
+        if len(history_out) != 0:
+            amount_out = history_out['amount'].sum()
+
+        # calculate amount availabel
+        amount_available = amount_in - amount_out
+
+        # return
+        return amount_available
+    
+    def query_amount_available(self, checkpoint=None):
+        return self.query_amount_available_offline(checkpoint)
     
     def query_history_tx(self):
         self.update_data()
@@ -162,7 +205,7 @@ class dAppUser:
             amount_btc = self.calculate_amount(row['amount'])
             message = row['message']
 
-            amount_balance = self.query_amount_available_from_account(timestamp)
+            amount_balance = self.query_amount_available_offline(timestamp)
 
             if to_user == id_user:
                 info = f"{timestamp}: Receive Money from {from_user} with {amount_btc} BTC. Message: '{message}'. Amount Available: {amount_balance} BTC"
@@ -172,10 +215,18 @@ class dAppUser:
             result += [info]
 
         return result
+
+    def account_find(self, address='164qjko1sVX1fAr5gzrphEHJu7NEXDUHhb'):
+        self.update_data()
+        
+        for id_user, info in self.db_account.items():
+            if info['address'] == address:
+                return info
+        return None
     
     def amount_atm(self, my_amount, withdrawals=50):
         # check enough money
-        if self.amount_available(my_amount) < withdrawals:
+        if self.calculate_amount(my_amount) < withdrawals:
             return None
 
         in_count_1_btc = len(my_amount['1 BTC'])
@@ -246,7 +297,7 @@ class dAppUser:
                to_add='1QBgVdUdMChYa64o7mx8eA4ycNySU6owzb',
                deposits=10, 
                message='Init account for customer: ADD00001',
-               fee=1):
+               fee=0):
 
         self.update_data() 
         
@@ -256,7 +307,7 @@ class dAppUser:
         private_key = self.my_user['root']['private_key']
         
         # check enough money
-        if self.amount_available(owner_amount) < deposits:
+        if self.calculate_amount(owner_amount) < deposits:
             print('Not Enough BTC')
             return None
         
@@ -286,51 +337,6 @@ class dAppUser:
         buffer_tx_data = self.buffer_tx_data + [tx]
         self.update_buffer_tx(buffer_tx_data)
 
-    def query_amount_available_from_blockchain(self, address, checkpoint):
-        self.update_data() 
-        
-        # parms
-        tx_total = []
-        for name_block in self.block_chain.keys():
-            block = self.block_chain[name_block]
-            tx_total += block['data']
-
-        tx_total += self.tx_buffer
-
-        history = pd.DataFrame(tx_total)
-        history['amount'] = history['amount'].apply(self.calculate_amount)
-        history = pd.DataFrame(history)
-        history = history[history['timestamp'] <= history]
-
-        # calculate amount in
-        amount_in = 0
-        if address == self.db_account['SER00000']['address']:
-            amount_in = 100000
-
-        history_in = history[history['to'] == address]
-        if len(history_in) != 0:
-            amount_in = history_in['amount'].sum()
-
-        # calculate amount out
-        amount_out = 0
-        history_out = history[history['from'] == address]
-        if len(history_out) != 0:
-            amount_out = history_out['amount'].sum()
-
-        # calculate amount availabel
-        amount_available = amount_in - amount_out
-
-        # return
-        return amount_available
-    
-    def account_find(self, address='164qjko1sVX1fAr5gzrphEHJu7NEXDUHhb'):
-        self.update_data()
-        
-        for id_user, info in self.db_account.items():
-            if info['address'] == address:
-                return info
-        return None
-
     def tx_valid(self, tx):
         self.update_data()
         
@@ -345,7 +351,7 @@ class dAppUser:
         # verify: sum(in_tx) - sum(out_tx) - free >= 0
         deposits = self.calculate_amount(transfer_amount)
 
-        if self.query_amount_available_from_blockchain(from_add, timestamp) < deposits:
+        if self.query_amount_available_online(from_add, timestamp) < deposits:
             print('Not Enough BTC')
             return None
 
@@ -363,8 +369,11 @@ class dAppUser:
         except InvalidSignature:
             return False
         
-    def proof_of_work(self, block, deadline=60*2):
+    def proof_of_work(self, deadline=60*2):
         self.update_data()
+        block = self.buffer_block
+        if len(block) == 0:
+            return None
         
         name_block = list(block.keys())[0]
         data_block = block[name_block]

@@ -58,7 +58,7 @@ class dAppServer:
         try:
             if user_id != 'SER00000':
                 print('UserID or Password is incorrect')
-            
+
             user = json.load(open(f'{ACCOUNT_PATH}/{user_id}.json'))
             hash_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
             if hash_password == user['root']['password']:
@@ -76,6 +76,9 @@ class dAppServer:
         self.is_login = False
         
     def update_buffer_tx(self, buffer_tx_data):
+        if self.buffer_tx['timestamp'] == None:
+            self.buffer_tx['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+            
         self.buffer_tx['data'] = buffer_tx_data
         with open(f'{PUBLIC_PATH}/buffer_tx.json', "w+") as file: 
             json.dump(self.buffer_tx, file)
@@ -112,7 +115,7 @@ class dAppServer:
 
         return result
     
-    def query_amount_available_from_account(self, checkpoint=None):
+    def query_amount_available_offline(self, checkpoint=None):
         self.update_data()
         
         # load data
@@ -127,7 +130,7 @@ class dAppServer:
             history = history[history['timestamp'] <= checkpoint]
 
         # calculate amount in
-        amount_in = 0
+        amount_in = 100000
 
         history_in = history[history['to'] == address]
         if len(history_in) != 0:
@@ -145,6 +148,48 @@ class dAppServer:
         # return
         return amount_available
     
+    def query_amount_available_online(self, address, checkpoint=None):
+        self.update_data()
+        
+        # parms
+        tx_total = []
+        for name_block in self.block_chain.keys():
+            block = self.block_chain[name_block]
+            tx_total += block['data']
+
+        tx_total += self.buffer_tx_data
+
+        history = pd.DataFrame(tx_total)
+        history['amount'] = history['amount'].apply(self.calculate_amount)
+        history = pd.DataFrame(history)
+        
+        if checkpoint != None:
+            history = history[history['timestamp'] <= checkpoint]
+
+        # calculate amount in
+        amount_in = 0
+        if address == self.db_account['SER00000']['address']:
+            amount_in = 100000
+
+        history_in = history[history['to'] == address]
+        if len(history_in) != 0:
+            amount_in = history_in['amount'].sum()
+
+        # calculate amount out
+        amount_out = 0
+        history_out = history[history['from'] == address]
+        if len(history_out) != 0:
+            amount_out = history_out['amount'].sum()
+
+        # calculate amount availabel
+        amount_available = amount_in - amount_out
+
+        # return
+        return amount_available
+    
+    def query_amount_available(self, checkpoint=None):
+        return self.query_amount_available_offline(checkpoint)
+
     def query_history_tx(self):
         self.update_data()
         
@@ -191,6 +236,14 @@ class dAppServer:
             result += [info]
 
         return result
+    
+    def account_find(self, address='164qjko1sVX1fAr5gzrphEHJu7NEXDUHhb'):
+        self.update_data()
+        
+        for id_user, info in self.db_account.items():
+            if info['address'] == address:
+                return info
+        return None
     
     def add_gen(self, public_key):
         sha256 = hashlib.sha256(bytearray.fromhex(public_key)).hexdigest()
@@ -247,12 +300,26 @@ class dAppServer:
                    },
                    'history': []
                   }
+        
+        # Update database account
+        self.db_account.update({
+            id_user: {
+                'public_key': public_key, 
+                'address': address
+            }
+        })
+        with open(f'{PUBLIC_PATH}/accounts.json', "w+") as file:
+            json.dump(self.db_account, file)
 
+        # return
+        with open(f'{ACCOUNT_PATH}/{id_user}.json', "w+") as file: 
+            json.dump(account, file)
+        
         return account
 
     def amount_atm(self, my_amount, withdrawals=50):
         # check enough money
-        if self.amount_available(my_amount) < withdrawals:
+        if self.calculate_amount(my_amount) < withdrawals:
             return None
 
         in_count_1_btc = len(my_amount['1 BTC'])
@@ -323,7 +390,7 @@ class dAppServer:
                to_add='1QBgVdUdMChYa64o7mx8eA4ycNySU6owzb',
                deposits=10, 
                message='Init account for customer: ADD00001',
-               fee=1):
+               fee=0):
 
         self.update_data() 
         
@@ -333,7 +400,7 @@ class dAppServer:
         private_key = self.my_user['root']['private_key']
         
         # check enough money
-        if self.amount_available(owner_amount) < deposits:
+        if self.calculate_amount(owner_amount) < deposits:
             print('Not Enough BTC')
             return None
         
@@ -367,7 +434,10 @@ class dAppServer:
         self.update_data()
         
         user = self.account_gen(id_user, password)
-        
+
+        if user == None:
+            return None
+
         # get info
         from_add = self.my_user['root']['address']
         private_key = self.my_user['root']['private_key']
@@ -378,52 +448,7 @@ class dAppServer:
         self.tx_gen(to_add, num_btc, message, fee)
         
         return user
-
-    def query_amount_available_from_blockchain(self, address, checkpoint):
-        self.update_data()
-        
-        # parms
-        tx_total = []
-        for name_block in self.block_chain.keys():
-            block = self.block_chain[name_block]
-            tx_total += block['data']
-
-        tx_total += self.tx_buffer
-
-        history = pd.DataFrame(tx_total)
-        history['amount'] = history['amount'].apply(self.calculate_amount)
-        history = pd.DataFrame(history)
-        history = history[history['timestamp'] <= checkpoint]
-
-        # calculate amount in
-        amount_in = 0
-        if address == self.db_account['SER00000']['address']:
-            amount_in = 100000
-
-        history_in = history[history['to'] == address]
-        if len(history_in) != 0:
-            amount_in = history_in['amount'].sum()
-
-        # calculate amount out
-        amount_out = 0
-        history_out = history[history['from'] == address]
-        if len(history_out) != 0:
-            amount_out = history_out['amount'].sum()
-
-        # calculate amount availabel
-        amount_available = amount_in - amount_out
-
-        # return
-        return amount_available
     
-    def account_find(self, address='164qjko1sVX1fAr5gzrphEHJu7NEXDUHhb'):
-        self.update_data()
-        
-        for id_user, info in self.db_account.items():
-            if info['address'] == address:
-                return info
-        return None
-
     def tx_valid(self, tx):
         self.update_data()
         
@@ -437,7 +462,7 @@ class dAppServer:
 
         # verify: sum(in_tx) - sum(out_tx) - free >= 0
         deposits = self.calculate_amount(transfer_amount)
-        if self.query_amount_available_from_blockchain(from_add, timestamp) < deposits:
+        if self.query_amount_available_online(from_add, timestamp) < deposits:
             print('Not Enough BTC')
             return None
 
@@ -470,7 +495,7 @@ class dAppServer:
         else:
             self.update_buffer_tx(buffer_tx_data_valid)
         
-    def block_gen(self, name_block='BLK000000001'):
+    def block_gen(self):
         self.update_data()
         index_block = int(list(self.block_chain.keys())[-1][-10:]) + 1
         name_block = f"BLK{index_block:010}"
@@ -485,7 +510,7 @@ class dAppServer:
         
         # update data
         if len(buffer_tx_data) == 0:
-            self.init_buffer_block()
+            self.init_buffer_tx()
         else:
             self.update_buffer_tx(buffer_tx_data)
         
@@ -522,12 +547,16 @@ class dAppServer:
                 'transaction_count': len(tx_list_sub),
                 'data': tx_list_sub
             }
-        block = {'name_block': data_block}
+        block = {name_block: data_block}
 
-        return block
+        with open(f'{PUBLIC_PATH}/buffer_block.json', "w+") as file: 
+            json.dump(block, file)
         
-    def proof_of_work(self, block, deadline=60*2):
+    def proof_of_work(self, deadline=60*2):
         self.update_data()
+        block = self.buffer_block
+        if len(block) == 0:
+            return None
         
         name_block = list(block.keys())[0]
         data_block = block[name_block]
@@ -562,7 +591,6 @@ class dAppServer:
             if delta_time.seconds > deadline:
                 return None
             
-            
     def update_user(self, address, tx, type_address='from'):
         self.update_data()
         
@@ -594,7 +622,7 @@ class dAppServer:
                 in_btc_address = amount[type_btc]
                 tx_btc_address = receive_amount[type_btc]
                 
-                out_btc_address = list(set(in_btc_address) + set(tx_btc_address))
+                out_btc_address = list(set(in_btc_address) | set(tx_btc_address))
                 amount[type_btc] = out_btc_address
                 
         user['root']['amount'] = amount
@@ -602,8 +630,12 @@ class dAppServer:
         with open(f'{ACCOUNT_PATH}/{user_id}.json', "w+") as file: 
             json.dump(user, file)
             
-    def block_chain_add(self, block, pow_result):
+    def block_chain_add(self, pow_result):
         self.update_data()
+        block = self.buffer_block
+
+        if (len(block) == 0) or (pow_result == None):
+            return None
         
         # update nonce and hash
         name_block = list(block.keys())[0]

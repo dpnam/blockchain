@@ -201,7 +201,7 @@ class dAppInit:
                deposits=10, 
                private_key='6cdd8b34fdc6b39ecdd1326fd0e60fce1642e18ccfb99fbec611f1539aa1c0fe',
                message='Init account for customer: ADD00001',
-               fee=1):
+               fee=0):
 
         # info user
         owner_amount = user['root']['amount']
