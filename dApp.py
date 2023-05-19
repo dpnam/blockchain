@@ -361,7 +361,7 @@ class dAppInit:
         
     def run(self):
         # init: server and user_list
-        self.server = self.account_gen('SER00000')
+        self.server = self.account_gen('SER00000', 'SER00000')
         self.server['root']['amount'] = self.total_btc
         
         user_list = []

@@ -87,8 +87,8 @@ from dApp import dAppInit, dAppUser, dAppServer
 DATABASE_PATH = 'database'
 PUBLIC_PATH = f'{DATABASE_PATH}/public'
 
-# Init Block: 256 user + 1 server
-dAppInit.run()
+# Init Block: 256 users + 1 server
+dAppInit().run()
 
 # Server login
 server = dAppServer()

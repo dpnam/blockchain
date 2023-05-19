@@ -7,7 +7,7 @@ DATABASE_PATH = 'database'
 PUBLIC_PATH = f'{DATABASE_PATH}/public'
 
 # Init Block: 256 user + 1 server
-dAppInit.run()
+dAppInit().run()
 
 # Server login
 server = dAppServer()
